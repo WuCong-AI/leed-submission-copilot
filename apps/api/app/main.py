@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 import os
 import tempfile
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from packages.leed_core.registry import RegistryService
@@ -117,7 +117,7 @@ async def upload_documents(project_id: UUID, files: list[UploadFile] = File(...)
 
 
 @app.post("/api/projects/{project_id}/documents/upload-chunk")
-async def upload_chunk(project_id: UUID, chunk: UploadFile = File(...), upload_id: str = "", filename: str = "upload.zip", chunk_index: int = 0, total_chunks: int = 1, document_type: str = "other", phase: str = "concept", discipline: str = "other", related_credit_id: str | None = None) -> dict:
+async def upload_chunk(project_id: UUID, background_tasks: BackgroundTasks, chunk: UploadFile = File(...), upload_id: str = "", filename: str = "upload.zip", chunk_index: int = 0, total_chunks: int = 1, document_type: str = "other", phase: str = "concept", discipline: str = "other", related_credit_id: str | None = None) -> dict:
     """Append an upload chunk and process the archive only after the final chunk arrives."""
     get_project(project_id)
     if total_chunks < 1 or chunk_index < 0 or chunk_index >= total_chunks:
@@ -138,17 +138,21 @@ async def upload_chunk(project_id: UUID, chunk: UploadFile = File(...), upload_i
     session["next"] += 1
     if session["next"] < total_chunks:
         return {"upload_id": session_id, "complete": False, "received_chunks": session["next"], "total_chunks": total_chunks}
-    try:
-        result = store.add_document_path(project_id, session["filename"], session["path"], DocumentUpload(document_type=document_type, phase=phase, discipline=discipline, related_credit_id=related_credit_id))
-        return {"upload_id": session_id, "complete": True, **result}
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    finally:
-        store.upload_sessions.pop(session_id, None)
-        try:
-            os.remove(session["path"])
-        except OSError:
-            pass
+    metadata = DocumentUpload(document_type=document_type, phase=phase, discipline=discipline, related_credit_id=related_credit_id)
+    job_id = str(uuid4())
+    store.upload_jobs[job_id] = {"project_id": project_id, "status": "queued", "filename": session["filename"], "uploaded": [], "count": 0}
+    background_tasks.add_task(store.process_upload_job, job_id, project_id, session["filename"], session["path"], metadata)
+    store.upload_sessions.pop(session_id, None)
+    return {"upload_id": session_id, "complete": True, "processing": True, "job_id": job_id, "uploaded": [], "count": 0}
+
+
+@app.get("/api/projects/{project_id}/documents/upload-status/{job_id}")
+def upload_status(project_id: UUID, job_id: str) -> dict:
+    get_project(project_id)
+    job = store.upload_jobs.get(job_id)
+    if job is None or job.get("project_id") != project_id:
+        raise HTTPException(status_code=404, detail="Upload job not found")
+    return {key: value for key, value in job.items() if key != "project_id"}
 
 
 @app.get("/api/projects/{project_id}/documents")

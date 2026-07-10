@@ -33,6 +33,7 @@ class MemoryStore:
         self.chunks: dict[UUID, list[dict]] = {}
         self.analyses: dict[UUID, dict] = {}
         self.upload_sessions: dict[str, dict] = {}
+        self.upload_jobs: dict[str, dict] = {}
 
     def create_project(self, input: ProjectCreate) -> ProjectSummary:
         project = ProjectSummary(**input.model_dump(), id=uuid4(), created_at=datetime.now(timezone.utc))
@@ -70,6 +71,22 @@ class MemoryStore:
     def add_document_path(self, project_id: UUID, filename: str, path: str, metadata: DocumentUpload) -> dict:
         extracted = extract_upload_path(filename, path)
         return self._store_extracted(project_id, extracted, metadata, filename.lower().endswith(".zip"))
+
+    def process_upload_job(self, job_id: str, project_id: UUID, filename: str, path: str, metadata: DocumentUpload) -> None:
+        job = self.upload_jobs.get(job_id)
+        if job is None:
+            return
+        job["status"] = "processing"
+        try:
+            result = self.add_document_path(project_id, filename, path, metadata)
+            job.update({"status": "complete", **result})
+        except Exception as exc:  # keep the worker alive and expose a useful UI error
+            job.update({"status": "error", "error": f"{type(exc).__name__}: {exc}"})
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
     def _store_extracted(self, project_id: UUID, extracted: list[dict], metadata: DocumentUpload, archive: bool = False) -> dict:
         created = []
