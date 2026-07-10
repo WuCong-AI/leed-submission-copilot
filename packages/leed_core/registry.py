@@ -96,7 +96,6 @@ class RegistryService:
         if not modules:
             issues.append("No credit modules found.")
         for module in modules:
-            if module.registry_path == "builtin/catalog":
             folder = ROOT / module.registry_path
             missing = REQUIRED_MODULE_FILES.difference(item.name for item in folder.iterdir())
             if missing:
