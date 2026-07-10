@@ -1,0 +1,7 @@
+evidence_checks: [policy_effective_date, reporting_period]
+calculation_checks: [NEED_OFFICIAL_SOURCE]
+consistency_checks: [operational_period_consistency, metering_period_consistency]
+common_contradictions: [policy_date_after_reporting_period]
+prerequisite_risks: [NEED_OFFICIAL_SOURCE]
+cross_credit_risks: [waste_water_energy_reporting_period_mismatch]
+confidence_rules: ["Operational raw data citation required"]

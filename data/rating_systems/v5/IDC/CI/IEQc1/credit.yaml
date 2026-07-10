@@ -1,0 +1,15 @@
+leed_version: v5
+rating_family: IDC
+adaptation: CI
+credit_id: IEQc1
+credit_code: IEQc1
+credit_name: Indoor Air Quality
+category: Indoor Environmental Quality
+is_prerequisite: false
+max_points: null
+module_type: iaq
+official_source_status: NEED_OFFICIAL_SOURCE
+requirement_summary: NEED_OFFICIAL_SOURCE
+achievement_paths: [NEED_OFFICIAL_SOURCE]
+related_credits: [MRc1]
+assumptions: ["MVP module only."]

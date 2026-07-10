@@ -1,0 +1,5 @@
+requirements:
+  - requirement_text: NEED_OFFICIAL_SOURCE
+    responsible_party: contractor
+    evidence_required: [NEED_OFFICIAL_SOURCE]
+    due_phase: tender

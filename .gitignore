@@ -1,0 +1,7 @@
+.env
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+apps/web/node_modules/
+apps/web/.next/
+apps/api/uploads/

@@ -1,0 +1,2 @@
+import { WorkspaceNav, MissingInformationChecklist } from "../../../../../components/workspace";
+export default async function Review({ params }: { params: Promise<{ projectId: string }> }) { const { projectId } = await params; return <main className="shell"><WorkspaceNav projectId={projectId}/><h1>Stage review</h1><p>Select phase, credits, documents and review depth. Findings return citations, confidence and discipline actions.</p><MissingInformationChecklist/></main>; }

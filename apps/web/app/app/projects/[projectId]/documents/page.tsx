@@ -1,0 +1,2 @@
+import { WorkspaceNav, EvidenceCitation } from "../../../../../components/workspace";
+export default async function Documents({ params }: { params: Promise<{ projectId: string }> }) { const { projectId } = await params; return <main className="shell"><WorkspaceNav projectId={projectId}/><h1>Document center</h1><div className="card">Drag-and-drop upload: type, phase, discipline, and related credit are stored with each document.<br/><EvidenceCitation/></div></main>; }

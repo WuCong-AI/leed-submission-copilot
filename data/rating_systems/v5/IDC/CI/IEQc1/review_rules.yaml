@@ -1,0 +1,7 @@
+evidence_checks: [iaq_document]
+calculation_checks: [NEED_OFFICIAL_SOURCE]
+consistency_checks: [occupancy_consistency, ventilation_zone_consistency]
+common_contradictions: [drawing_and_specification_mismatch]
+prerequisite_risks: [NEED_OFFICIAL_SOURCE]
+cross_credit_risks: [low_emitting_scope_mismatch]
+confidence_rules: ["Citations required"]

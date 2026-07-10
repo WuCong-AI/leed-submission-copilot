@@ -1,0 +1,7 @@
+evidence_checks: [NEED_OFFICIAL_SOURCE]
+calculation_checks: [NEED_OFFICIAL_SOURCE]
+consistency_checks: [project_boundary_consistency, gross_floor_area_consistency]
+common_contradictions: [drawing_and_form_scope_mismatch]
+prerequisite_risks: [NEED_OFFICIAL_SOURCE]
+cross_credit_risks: [energy_water_scope_mismatch]
+confidence_rules: ["No source citation means confidence <= 0.35"]

@@ -1,0 +1,1 @@
+{"required": [{"evidence_type": "integrative workshop record", "required_phase": "concept", "accepted_file_types": ["pdf", "docx", "xlsx"], "required_fields": ["NEED_OFFICIAL_SOURCE"], "validation_rules": ["NEED_OFFICIAL_SOURCE"], "citation_required": true, "responsible_discipline": "leed_consultant"}], "optional": []}

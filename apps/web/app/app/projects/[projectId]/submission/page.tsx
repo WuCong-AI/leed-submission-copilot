@@ -1,0 +1,2 @@
+import { WorkspaceNav, EvidenceCitation } from "../../../../../components/workspace";
+export default async function Submission({ params }: { params: Promise<{ projectId: string }> }) { const { projectId } = await params; return <main className="shell"><WorkspaceNav projectId={projectId}/><h1>Submission packet</h1><p>Narrative, attachment index, evidence manifest, assumptions, missing items and reviewer-risk warning.</p><EvidenceCitation/></main>; }

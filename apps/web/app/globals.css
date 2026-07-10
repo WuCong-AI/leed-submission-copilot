@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color: #17352c; background: #f7f8f4; font-family: Arial, sans-serif; }
+body { margin: 0; }
+.shell { max-width: 1200px; margin: auto; padding: 28px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.card { background: white; border: 1px solid #dce8df; border-radius: 12px; padding: 18px; }
+.tag { display:inline-block; padding:4px 8px; border-radius:999px; background:#e8f2ea; font-size:12px; }
+.warn { color:#9a5b00; }

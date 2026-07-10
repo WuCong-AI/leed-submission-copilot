@@ -1,0 +1,15 @@
+leed_version: v5
+rating_family: BDC
+adaptation: NC
+credit_id: IPc1
+credit_code: IPc1
+credit_name: Integrative Design
+category: Integrative Process
+is_prerequisite: false
+max_points: null
+module_type: integrative_process
+official_source_status: NEED_OFFICIAL_SOURCE
+requirement_summary: NEED_OFFICIAL_SOURCE
+achievement_paths: [NEED_OFFICIAL_SOURCE]
+related_credits: [WEc1, EAc1]
+assumptions: ["MVP module only; add user-provided official source material."]

@@ -1,0 +1,2 @@
+import { WorkspaceNav, RiskBadge } from "../../../../../components/workspace";
+export default async function Comments({ params }: { params: Promise<{ projectId: string }> }) { const { projectId } = await params; return <main className="shell"><WorkspaceNav projectId={projectId}/><h1>Reviewer comments and response drafting</h1><RiskBadge level="needs_official_source"/><p>Predictions are structured risk patterns, never a GBCI decision or copied precedent text.</p></main>; }

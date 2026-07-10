@@ -1,0 +1,2 @@
+import { WorkspaceNav, EvidenceCitation } from "../../../../../components/workspace";
+export default async function Tender({ params }: { params: Promise<{ projectId: string }> }) { const { projectId } = await params; return <main className="shell"><WorkspaceNav projectId={projectId}/><h1>Tender requirements</h1><p>Registry-mapped technical requirement drafts, contractor responsibility matrix and submittal register. Legal review remains mandatory.</p><EvidenceCitation file="Registry tender_requirements.yaml"/></main>; }

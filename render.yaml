@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: leed-submission-copilot-api
+    runtime: docker
+    dockerContext: .
+    dockerfilePath: ./apps/api/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: STORAGE_BACKEND
+        value: local
+      - key: LOCAL_STORAGE_PATH
+        value: /data/uploads
+      - key: EMBEDDING_PROVIDER
+        value: fake
+      - key: LLM_PROVIDER
+        value: fake
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: leed-submission-copilot-db
+          property: connectionString
+  - type: web
+    name: leed-submission-copilot-web
+    runtime: docker
+    dockerContext: .
+    dockerfilePath: ./apps/web/Dockerfile
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: leed-submission-copilot-api
+          envVarKey: RENDER_EXTERNAL_URL
+databases:
+  - name: leed-submission-copilot-db
+    plan: free
+    databaseName: leed
+    user: leed

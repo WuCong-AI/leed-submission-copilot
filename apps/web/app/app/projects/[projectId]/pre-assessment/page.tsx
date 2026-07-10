@@ -1,0 +1,2 @@
+import { WorkspaceNav, MissingInformationChecklist } from "../../../../../components/workspace";
+export default async function PreAssessment({ params }: { params: Promise<{ projectId: string }> }) { const { projectId } = await params; return <main className="shell"><WorkspaceNav projectId={projectId}/><h1>Pre-assessment</h1><p>Shows rating-system fit, prerequisite risk matrix, conservative/target/stretch score fields, design decisions and discipline actions.</p><MissingInformationChecklist/></main>; }

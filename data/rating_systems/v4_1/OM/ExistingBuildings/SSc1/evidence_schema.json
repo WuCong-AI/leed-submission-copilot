@@ -1,0 +1,1 @@
+{"required": [{"evidence_type": "policy and operational records", "required_phase": "submission", "accepted_file_types": ["pdf", "docx", "xlsx", "csv"], "required_fields": ["policy_effective_date", "reporting_period"], "validation_rules": ["NEED_OFFICIAL_SOURCE"], "citation_required": true, "responsible_discipline": "facility_manager"}], "optional": []}
