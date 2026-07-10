@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
+import tempfile
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -13,7 +15,7 @@ from .schemas import (
     ReviewFinding, StageReviewRequest, StageReviewResponse, SubmissionPacketResponse,
     TenderRequirementResponse,
 )
-from .ingestion import extract_upload
+from .ingestion import extract_upload, extract_upload_path
 from .assessment import assess
 
 
@@ -30,6 +32,7 @@ class MemoryStore:
         self.documents: dict[UUID, list[dict]] = {}
         self.chunks: dict[UUID, list[dict]] = {}
         self.analyses: dict[UUID, dict] = {}
+        self.upload_sessions: dict[str, dict] = {}
 
     def create_project(self, input: ProjectCreate) -> ProjectSummary:
         project = ProjectSummary(**input.model_dump(), id=uuid4(), created_at=datetime.now(timezone.utc))
@@ -62,6 +65,13 @@ class MemoryStore:
         content = await upload.read()
         filename = Path(upload.filename or "upload.bin").name
         extracted = extract_upload(filename, content, upload.content_type)
+        return self._store_extracted(project_id, extracted, metadata, filename.lower().endswith(".zip"))
+
+    def add_document_path(self, project_id: UUID, filename: str, path: str, metadata: DocumentUpload) -> dict:
+        extracted = extract_upload_path(filename, path)
+        return self._store_extracted(project_id, extracted, metadata, filename.lower().endswith(".zip"))
+
+    def _store_extracted(self, project_id: UUID, extracted: list[dict], metadata: DocumentUpload, archive: bool = False) -> dict:
         created = []
         for item in extracted:
             doc_id = uuid4()
@@ -69,7 +79,7 @@ class MemoryStore:
             self.documents[project_id].append(record)
             self.chunks[doc_id] = [{"chunk_index": 0, "chunk_text": item["text"][:10000], "source_refs": [{"filename": item["filename"], "archive_member": item.get("archive_member"), "document_id": str(doc_id)}]}]
             created.append(record)
-        return {"uploaded": created, "count": len(created), "archive": filename.lower().endswith(".zip")}
+        return {"uploaded": created, "count": len(created), "archive": archive}
 
     def evidence(self, project_id: UUID, credit_id: str) -> list[EvidenceItem]:
         documents = [doc for doc in self.documents[project_id] if doc.get("related_credit_id") in {None, credit_id}]

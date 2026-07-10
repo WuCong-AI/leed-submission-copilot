@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from uuid import UUID
+from uuid import UUID, uuid4
+import os
+import tempfile
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -112,6 +114,41 @@ async def upload_documents(project_id: UUID, files: list[UploadFile] = File(...)
     for file in files:
         uploaded.append(await store.add_document(project_id, file, DocumentUpload(document_type=document_type, phase=phase, discipline=discipline, related_credit_id=related_credit_id)))
     return {"files": uploaded, "count": sum(item.get("count", 0) for item in uploaded)}
+
+
+@app.post("/api/projects/{project_id}/documents/upload-chunk")
+async def upload_chunk(project_id: UUID, chunk: UploadFile = File(...), upload_id: str = "", filename: str = "upload.zip", chunk_index: int = 0, total_chunks: int = 1, document_type: str = "other", phase: str = "concept", discipline: str = "other", related_credit_id: str | None = None) -> dict:
+    """Append an upload chunk and process the archive only after the final chunk arrives."""
+    get_project(project_id)
+    if total_chunks < 1 or chunk_index < 0 or chunk_index >= total_chunks:
+        raise HTTPException(status_code=422, detail="Invalid chunk index")
+    payload = await chunk.read()
+    if len(payload) > 16 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Chunk exceeds 16 MB")
+    session_id = upload_id or str(uuid4())
+    session = store.upload_sessions.get(session_id)
+    if session is None:
+        path = os.path.join(tempfile.gettempdir(), f"leed-upload-{session_id}.part")
+        session = {"path": path, "filename": os.path.basename(filename), "next": 0, "total": total_chunks, "project_id": project_id}
+        store.upload_sessions[session_id] = session
+    if session["project_id"] != project_id or session["total"] != total_chunks or chunk_index != session["next"]:
+        raise HTTPException(status_code=409, detail=f"Expected chunk {session['next']}")
+    with open(session["path"], "ab") as handle:
+        handle.write(payload)
+    session["next"] += 1
+    if session["next"] < total_chunks:
+        return {"upload_id": session_id, "complete": False, "received_chunks": session["next"], "total_chunks": total_chunks}
+    try:
+        result = store.add_document_path(project_id, session["filename"], session["path"], DocumentUpload(document_type=document_type, phase=phase, discipline=discipline, related_credit_id=related_credit_id))
+        return {"upload_id": session_id, "complete": True, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        store.upload_sessions.pop(session_id, None)
+        try:
+            os.remove(session["path"])
+        except OSError:
+            pass
 
 
 @app.get("/api/projects/{project_id}/documents")

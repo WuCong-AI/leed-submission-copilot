@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import mimetypes
 import re
 import zipfile
@@ -8,9 +9,9 @@ from pathlib import PurePosixPath
 from typing import Any
 
 
-MAX_FILE_BYTES = 75 * 1024 * 1024
+MAX_FILE_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_FILES = 500
-MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
+MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".xml", ".ifc", ".dxf", ".html", ".log"}
 DRAWING_EXTENSIONS = {".pdf", ".dwg", ".dxf", ".rvt", ".rfa", ".ifc", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
@@ -88,4 +89,27 @@ def extract_upload(name: str, data: bytes, content_type: str | None = None) -> l
             total += member.file_size
             payload = archive.read(member)
             results.append(extract_file(str(path), payload, None, archive_member=str(path)))
+    return results
+
+
+def extract_upload_path(name: str, path: str, content_type: str | None = None) -> list[dict[str, Any]]:
+    """Extract a ZIP incrementally from disk so large archives do not duplicate in RAM."""
+    if not name.lower().endswith(".zip"):
+        with open(path, "rb") as handle:
+            return [extract_file(name, handle.read(), content_type)]
+    results: list[dict[str, Any]] = []
+    with zipfile.ZipFile(path) as archive:
+        members = [m for m in archive.infolist() if not m.is_dir()]
+        if len(members) > MAX_ARCHIVE_FILES:
+            raise ValueError(f"ZIP contains more than {MAX_ARCHIVE_FILES} files")
+        total = 0
+        for member in members:
+            member_path = PurePosixPath(member.filename.replace("\\", "/"))
+            if member_path.is_absolute() or ".." in member_path.parts:
+                raise ValueError(f"Unsafe ZIP path rejected: {member.filename}")
+            if member.file_size > MAX_FILE_BYTES or total + member.file_size > MAX_ARCHIVE_BYTES:
+                raise ValueError("ZIP uncompressed size exceeds the safe processing limit")
+            total += member.file_size
+            with archive.open(member, "r") as handle:
+                results.append(extract_file(str(member_path), handle.read(), None, archive_member=str(member_path)))
     return results
