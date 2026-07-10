@@ -3,10 +3,11 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
 from packages.leed_core.registry import RegistryService
 from .schemas import (
-    CommentRiskResponse, DocumentUpload, PreAssessmentRequest, PreAssessmentResponse,
+    AnalysisResponse, CommentRiskResponse, DocumentUpload, PreAssessmentRequest, PreAssessmentResponse,
     ProjectCreate, ProjectCreditStatus, ProjectSummary, StageReviewRequest,
     StageReviewResponse, SubmissionPacketResponse, TenderRequirementResponse,
 )
@@ -15,6 +16,7 @@ from .seed import seed_demo_projects
 
 
 app = FastAPI(title="LEED Submission Copilot API", version="0.1.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], expose_headers=["*"])
 registry = RegistryService()
 store = MemoryStore(registry)
 
@@ -103,6 +105,15 @@ async def upload_document(project_id: UUID, file: UploadFile = File(...), docume
     return await store.add_document(project_id, file, DocumentUpload(document_type=document_type, phase=phase, discipline=discipline, related_credit_id=related_credit_id))
 
 
+@app.post("/api/projects/{project_id}/documents/upload-batch")
+async def upload_documents(project_id: UUID, files: list[UploadFile] = File(...), document_type: str = "other", phase: str = "concept", discipline: str = "other", related_credit_id: str | None = None) -> dict:
+    get_project(project_id)
+    uploaded = []
+    for file in files:
+        uploaded.append(await store.add_document(project_id, file, DocumentUpload(document_type=document_type, phase=phase, discipline=discipline, related_credit_id=related_credit_id)))
+    return {"files": uploaded, "count": sum(item.get("count", 0) for item in uploaded)}
+
+
 @app.get("/api/projects/{project_id}/documents")
 def documents(project_id: UUID) -> list[dict]:
     get_project(project_id)
@@ -127,6 +138,18 @@ def process_document(document_id: UUID) -> dict:
 def pre_assessment(project_id: UUID, request: PreAssessmentRequest) -> PreAssessmentResponse:
     get_project(project_id)
     return store.pre_assessment(project_id, request)
+
+
+@app.post("/api/projects/{project_id}/analyze", response_model=AnalysisResponse)
+def analyze_project(project_id: UUID, request: PreAssessmentRequest | None = None) -> dict:
+    get_project(project_id)
+    return store.analyze(project_id, request.document_ids if request else None)
+
+
+@app.get("/api/projects/{project_id}/analysis", response_model=AnalysisResponse)
+def latest_analysis(project_id: UUID) -> dict:
+    get_project(project_id)
+    return store.analyses.get(project_id) or store.analyze(project_id)
 
 
 @app.post("/api/projects/{project_id}/stage-review", response_model=StageReviewResponse)

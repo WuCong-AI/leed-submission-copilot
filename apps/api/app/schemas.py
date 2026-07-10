@@ -7,7 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
-LeedVersion = Literal["v4_1", "v5"]
+LeedVersion = Literal["v4", "v4_1", "v5"]
 RatingFamily = Literal["BDC", "IDC", "OM"]
 ProjectPhase = Literal["concept", "schematic_design", "design_development", "construction_documents", "tender", "construction", "as_built", "submission", "comment_response"]
 
@@ -116,6 +116,10 @@ class PreAssessmentResponse(BaseModel):
     missing_information: list[str]
     recommended_actions_by_discipline: dict[str, list[str]]
     assumptions: list[str]
+    total_possible_points: int = 0
+    evidence_points: int = 0
+    certification: str = "Not enough evidence"
+    automated_findings: list[dict] = Field(default_factory=list)
 
 
 class SubmissionPacketResponse(BaseModel):
@@ -148,3 +152,18 @@ class TenderRequirementResponse(BaseModel):
     due_phase: str
     source_rule_refs: list[str]
     legal_review_required: bool = True
+
+
+class AnalysisResponse(BaseModel):
+    project_id: UUID
+    total_possible_points: int
+    evidence_points: int
+    conservative_score: int
+    target_score: int
+    stretch_score: int
+    certification: str
+    confidence: float
+    drawing_summary: dict = Field(default_factory=dict)
+    credit_results: list[dict] = Field(default_factory=list)
+    findings: list[dict] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)

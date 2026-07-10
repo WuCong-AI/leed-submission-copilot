@@ -9,3 +9,25 @@ body { margin: 0; }
 .card { background: white; border: 1px solid #dce8df; border-radius: 12px; padding: 18px; }
 .tag { display:inline-block; padding:4px 8px; border-radius:999px; background:#e8f2ea; font-size:12px; }
 .warn { color:#9a5b00; }
+.page-head { display:flex; justify-content:space-between; gap:24px; align-items:flex-start; margin-bottom:24px; }
+.eyebrow { color:#5b8066; text-transform:uppercase; letter-spacing:.12em; font-size:11px; font-weight:700; }
+.button, button { display:inline-block; border:0; border-radius:8px; padding:10px 14px; background:#1f6b4f; color:#fff; text-decoration:none; cursor:pointer; font-weight:700; }
+button.secondary { background:#dcece0; color:#17352c; }
+button:disabled { opacity:.55; cursor:not-allowed; }
+.project-link { color:inherit; text-decoration:none; }
+.form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; }
+label { display:flex; flex-direction:column; gap:6px; font-size:13px; font-weight:700; }
+input, select, textarea { border:1px solid #cbdacf; border-radius:7px; padding:10px; background:#fff; font:inherit; color:#17352c; }
+.form-grid button, .form-grid .error { grid-column:1/-1; }
+.upload-box { display:flex; flex-direction:column; gap:16px; margin-bottom:24px; }
+.actions { display:flex; gap:10px; flex-wrap:wrap; }
+.status { color:#2f6b46; }
+.error { color:#a32929; background:#fff0f0; padding:10px; border-radius:7px; }
+.score-hero { display:flex; justify-content:space-between; align-items:center; background:#dcefe1; border-radius:12px; padding:22px; margin:18px 0; }
+.score-hero h2 { margin:.3rem 0; }
+.score-hero strong { font-size:48px; color:#1f6b4f; }
+.finding { background:#fff; border-left:5px solid #d7a33d; padding:14px 18px; margin:10px 0; border-radius:8px; }
+.finding.high, .finding.critical { border-left-color:#bb4b3e; }
+.finding.info { border-left-color:#4a9464; }
+.table-wrap { overflow-x:auto; background:#fff; border:1px solid #dce8df; border-radius:12px; }
+table { width:100%; border-collapse:collapse; } th, td { text-align:left; padding:12px; border-bottom:1px solid #e8eee9; font-size:13px; }

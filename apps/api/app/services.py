@@ -13,6 +13,8 @@ from .schemas import (
     ReviewFinding, StageReviewRequest, StageReviewResponse, SubmissionPacketResponse,
     TenderRequirementResponse,
 )
+from .ingestion import extract_upload
+from .assessment import assess
 
 
 def registry_key(project: ProjectCreate | ProjectSummary) -> tuple[str, str, str]:
@@ -27,6 +29,7 @@ class MemoryStore:
         self.scorecards: dict[UUID, dict[str, ProjectCreditStatus]] = {}
         self.documents: dict[UUID, list[dict]] = {}
         self.chunks: dict[UUID, list[dict]] = {}
+        self.analyses: dict[UUID, dict] = {}
 
     def create_project(self, input: ProjectCreate) -> ProjectSummary:
         project = ProjectSummary(**input.model_dump(), id=uuid4(), created_at=datetime.now(timezone.utc))
@@ -57,13 +60,16 @@ class MemoryStore:
 
     async def add_document(self, project_id: UUID, upload: UploadFile, metadata: DocumentUpload) -> dict:
         content = await upload.read()
-        doc_id = uuid4()
         filename = Path(upload.filename or "upload.bin").name
-        record = {"id": doc_id, "filename": filename, "document_type": metadata.document_type, "phase": metadata.phase, "discipline": metadata.discipline, "related_credit_id": metadata.related_credit_id, "processing_status": "processed", "size_bytes": len(content)}
-        self.documents[project_id].append(record)
-        text = content.decode("utf-8", errors="replace") if filename.lower().endswith((".txt", ".md", ".csv")) else "NEED_OFFICIAL_SOURCE: parser fallback did not extract this binary document."
-        self.chunks[doc_id] = [{"chunk_index": 0, "chunk_text": text[:10000], "source_refs": [{"filename": filename, "chunk_index": 0}]}]
-        return record
+        extracted = extract_upload(filename, content, upload.content_type)
+        created = []
+        for item in extracted:
+            doc_id = uuid4()
+            record = {"id": doc_id, "filename": item["filename"], "archive_member": item.get("archive_member"), "document_type": metadata.document_type, "phase": metadata.phase, "discipline": metadata.discipline, "related_credit_id": metadata.related_credit_id, "processing_status": "processed", "size_bytes": item["size_bytes"], "mime_type": item["mime_type"], "extension": item["extension"], "page_count": item["page_count"], "warnings": item["warnings"], "drawing": item["drawing"], "text_preview": item["text"][:1500]}
+            self.documents[project_id].append(record)
+            self.chunks[doc_id] = [{"chunk_index": 0, "chunk_text": item["text"][:10000], "source_refs": [{"filename": item["filename"], "archive_member": item.get("archive_member"), "document_id": str(doc_id)}]}]
+            created.append(record)
+        return {"uploaded": created, "count": len(created), "archive": filename.lower().endswith(".zip")}
 
     def evidence(self, project_id: UUID, credit_id: str) -> list[EvidenceItem]:
         documents = [doc for doc in self.documents[project_id] if doc.get("related_credit_id") in {None, credit_id}]
@@ -74,9 +80,23 @@ class MemoryStore:
     def pre_assessment(self, project_id: UUID, request: PreAssessmentRequest) -> PreAssessmentResponse:
         project = self.project(project_id)
         entries = self.scorecard(project_id)
+        analysis = self.analyze(project_id, request.document_ids or None)
         feasibility = [{"credit_id": item["credit"].credit_id, "credit_name": item["credit"].credit_name, "possible_points": item["credit"].max_points, "status": item["status"].status, "official_source_status": item["credit"].official_source_status} for item in entries]
         prereq_findings = [self._source_finding(item["credit"], project.current_phase) for item in entries if item["credit"].is_prerequisite]
-        return PreAssessmentResponse(rating_system_fit=f"Registry path: {project.leed_version}/{project.rating_family}/{project.adaptation}", prerequisite_risk_matrix=prereq_findings, credit_feasibility=feasibility, design_decisions_needed=["Confirm rating-system registration path against official project materials."], missing_information=["NEED_OFFICIAL_SOURCE: official thresholds and path options are not loaded for one or more modules."], recommended_actions_by_discipline={"leed_consultant": ["Load approved official registry source data before relying on score estimates."]}, assumptions=["No LEED thresholds or points are inferred outside the registry."])
+        return PreAssessmentResponse(rating_system_fit=f"Registry path: {project.leed_version}/{project.rating_family}/{project.adaptation}", prerequisite_risk_matrix=prereq_findings, credit_feasibility=feasibility, conservative_score=analysis["conservative_score"], target_score=analysis["target_score"], stretch_score=analysis["stretch_score"], design_decisions_needed=[f"Review {len([f for f in analysis['findings'] if f['severity'] in {'high','critical'}])} high-risk findings before submission."], missing_information=["NEED_OFFICIAL_SOURCE: official thresholds must be verified before certification.", *analysis["limitations"]], recommended_actions_by_discipline={"leed_consultant": [f["recommended_action"] for f in analysis["findings"][:8]]}, assumptions=["Automated result is indicative and must be checked against the selected official rating system."], total_possible_points=analysis["total_possible_points"], evidence_points=analysis["evidence_points"], certification=analysis["certification"], automated_findings=analysis["findings"])
+
+    def analyze(self, project_id: UUID, document_ids: list[UUID] | None = None) -> dict:
+        project = self.project(project_id)
+        documents = self.documents[project_id]
+        if document_ids:
+            allowed = set(document_ids)
+            documents = [d for d in documents if d["id"] in allowed]
+        modules = self.registry.list_credits(*registry_key(project))
+        result = assess(modules, documents, project.target_certification)
+        result["project_id"] = project_id
+        result["drawing_summary"] = {"document_count": len(documents), "drawing_candidates": sum(1 for d in documents if d.get("drawing", {}).get("is_drawing_candidate")), "disciplines": sorted({discipline for d in documents for discipline in d.get("drawing", {}).get("disciplines", [])}), "sheet_labels": sorted({sheet for d in documents for sheet in d.get("drawing", {}).get("sheet_labels", [])})[:100], "warnings": [warning for d in documents for warning in d.get("warnings", [])]}
+        self.analyses[project_id] = result
+        return result
 
     def stage_review(self, project_id: UUID, request: StageReviewRequest) -> StageReviewResponse:
         project = self.project(project_id)
