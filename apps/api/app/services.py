@@ -55,6 +55,8 @@ class MemoryStore:
                 "documents": {str(project_id): [{**record, "id": str(record["id"])} for record in rows] for project_id, rows in self.documents.items()},
                 "chunks": {str(document_id): rows for document_id, rows in self.chunks.items()},
                 "analyses": {str(project_id): result for project_id, result in self.analyses.items()},
+                "upload_jobs": self.upload_jobs,
+                "upload_sessions": self.upload_sessions,
             }
             temp_path = self.state_path.with_suffix(".tmp")
             temp_path.write_text(json.dumps(payload, ensure_ascii=False, default=str), encoding="utf-8")
@@ -70,9 +72,26 @@ class MemoryStore:
             self.documents = {UUID(project_id): [{**record, "id": UUID(record["id"])} for record in rows] for project_id, rows in payload.get("documents", {}).items()}
             self.chunks = {UUID(document_id): rows for document_id, rows in payload.get("chunks", {}).items()}
             self.analyses = {UUID(project_id): result for project_id, result in payload.get("analyses", {}).items()}
+            self.upload_jobs = {
+                str(job_id): {**job, "project_id": UUID(job["project_id"]) if isinstance(job.get("project_id"), str) else job.get("project_id")}
+                for job_id, job in payload.get("upload_jobs", {}).items()
+            }
+            self.upload_sessions = {
+                str(session_id): {**session, "project_id": UUID(session["project_id"]) if isinstance(session.get("project_id"), str) else session.get("project_id")}
+                for session_id, session in payload.get("upload_sessions", {}).items()
+            }
+            # A process cannot resume a Python background task after a restart.
+            # Keep the job visible to the UI and explain the safe next action.
+            for job in self.upload_jobs.values():
+                if job.get("status") in {"queued", "processing"}:
+                    job.update({"status": "error", "error": "Upload processing was interrupted by a service restart. The archive remains stored; please retry this upload."})
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             # A corrupt state file should not prevent the API from starting.
             self.projects, self.scorecards, self.documents, self.chunks, self.analyses = {}, {}, {}, {}, {}
+            self.upload_jobs, self.upload_sessions = {}, {}
+
+    def persist(self) -> None:
+        self._save_state()
 
     def create_project(self, input: ProjectCreate) -> ProjectSummary:
         project = ProjectSummary(**input.model_dump(), id=uuid4(), created_at=datetime.now(timezone.utc))
@@ -128,12 +147,14 @@ class MemoryStore:
         if job is None:
             return
         job["status"] = "processing"
+        self._save_state()
         try:
             result = self.add_document_path(project_id, filename, path, metadata)
             job.update({"status": "complete", **result})
         except Exception as exc:  # keep the worker alive and expose a useful UI error
             job.update({"status": "error", "error": f"{type(exc).__name__}: {exc}"})
         finally:
+            self._save_state()
             try:
                 os.remove(path)
             except OSError:

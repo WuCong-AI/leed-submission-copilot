@@ -145,11 +145,13 @@ async def upload_chunk(project_id: UUID, background_tasks: BackgroundTasks, chun
     with open(session["path"], "ab") as handle:
         handle.write(payload)
     session["next"] += 1
+    store.persist()
     if session["next"] < total_chunks:
         return {"upload_id": session_id, "complete": False, "received_chunks": session["next"], "total_chunks": total_chunks}
     metadata = DocumentUpload(document_type=document_type, phase=phase, discipline=discipline, related_credit_id=related_credit_id)
     job_id = str(uuid4())
     store.upload_jobs[job_id] = {"project_id": project_id, "status": "queued", "filename": session["filename"], "uploaded": [], "count": 0}
+    store.persist()
     background_tasks.add_task(store.process_upload_job, job_id, project_id, session["filename"], session["path"], metadata)
     # Keep a small completed-session marker so a retry of the final request
     # returns the original job rather than creating a second archive.
@@ -163,7 +165,9 @@ def upload_status(project_id: UUID, job_id: str) -> dict:
     get_project(project_id)
     job = store.upload_jobs.get(job_id)
     if job is None or job.get("project_id") != project_id:
-        raise HTTPException(status_code=404, detail="Upload job not found")
+        # A status poll must not turn a transient restart into a browser
+        # `Failed to fetch`. Return a structured terminal state instead.
+        return {"status": "error", "error": "Upload job is no longer available. Please retry the archive upload."}
     return {key: value for key, value in job.items() if key != "project_id"}
 
 
