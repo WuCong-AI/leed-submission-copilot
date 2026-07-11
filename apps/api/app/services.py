@@ -317,13 +317,16 @@ class MemoryStore:
             status = "missing" if not matches else ("needs_official_source" if official_required else "provided")
             matched_files = [{"document_id": str(document["id"]), "filename": document["filename"]} for document in matches]
             if status == "missing":
-                action = f"Add {name}; accepted types: {', '.join(accepted) or 'project evidence'}. Include: {', '.join(fields) or 'scope, calculation, conclusion'}; responsible party: {requirement.get('responsible_discipline', 'leed_consultant')}."
+                rule_action = RULES.get(module.module_type, ("", "", ""))[1]
+                action = f"{rule_action} Add {name}; accepted types: {', '.join(accepted) or 'project evidence'}. Include: {', '.join(fields) or 'scope, calculation, conclusion'}; responsible party: {requirement.get('responsible_discipline', 'leed_consultant')}."
                 steps = [f"Create or export a {', '.join(accepted) or 'project evidence'} file named with the credit ID and evidence type.", f"Add a dedicated section/table for: {', '.join(fields) or 'project scope, calculation, conclusion'}.", "Add page, drawing-sheet or calculation-cell references for every claim.", f"Assign final review to {requirement.get('responsible_discipline', 'leed_consultant')} before submission."]
             elif status == "needs_official_source":
-                action = f"For {name}, cite the official {module.leed_version} {module.rating_family}/{module.adaptation} clause and map each required field ({', '.join(fields)}) to a page, sheet or calculation cell."
+                rule_action = RULES.get(module.module_type, ("", "", ""))[1]
+                action = f"{rule_action} For {name}, cite the official {module.leed_version} {module.rating_family}/{module.adaptation} clause and map each required field ({', '.join(fields)}) to a page, sheet or calculation cell."
                 steps = [f"Insert the official {module.leed_version} {module.rating_family}/{module.adaptation} credit/prerequisite reference in the narrative.", f"Map each field ({', '.join(fields)}) to a page, sheet or calculation cell.", "Reconcile the narrative, drawings, calculations and scorecard scope before upload."]
             else:
-                action = f"Revise {name} to add explicit clause citation and page/sheet references for: {', '.join(fields) or 'scope and conclusion'}."
+                rule_action = RULES.get(module.module_type, ("", "", ""))[1]
+                action = f"{rule_action} Revise {name} to add explicit clause citation and page/sheet references for: {', '.join(fields) or 'scope and conclusion'}."
                 steps = [f"Add the official clause reference to {name}.", f"Add page/sheet/cell citations for: {', '.join(fields) or 'scope and conclusion'}.", "Check consistency with project boundary, area and related credits."]
             review.append({"requirement": name, "status": status, "required_phase": requirement.get("required_phase", "submission"), "accepted_file_types": accepted, "required_fields": fields, "validation_rules": requirement.get("validation_rules", []), "responsible_discipline": requirement.get("responsible_discipline", "leed_consultant"), "matched_files": matched_files, "modification_comment": action, "specific_modification_steps": steps})
             actions.append(action)
