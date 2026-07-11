@@ -15,6 +15,7 @@ MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 # Render's Starter instance has a 512 MB memory ceiling. Do not materialize
 # very large drawing members or PDFs in Python just to extract a small preview.
 MAX_IN_MEMORY_MEMBER_BYTES = 8 * 1024 * 1024
+MAX_PDF_TEXT_BYTES = 2 * 1024 * 1024
 TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".xml", ".ifc", ".dxf", ".html", ".log"}
 DRAWING_EXTENSIONS = {".pdf", ".dwg", ".dxf", ".rvt", ".rfa", ".ifc", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
@@ -94,7 +95,7 @@ def extract_upload(name: str, data: bytes, content_type: str | None = None) -> l
             if member.file_size > MAX_FILE_BYTES or total + member.file_size > MAX_ARCHIVE_BYTES:
                 raise ValueError("ZIP uncompressed size exceeds the safe processing limit")
             total += member.file_size
-            if member.file_size > MAX_IN_MEMORY_MEMBER_BYTES:
+            if member.file_size > MAX_IN_MEMORY_MEMBER_BYTES or (path.suffix.lower() == ".pdf" and member.file_size > MAX_PDF_TEXT_BYTES):
                 results.append(extract_file(str(path), b"", None, archive_member=str(path), declared_size=member.file_size, skip_content=True))
             else:
                 payload = archive.read(member)
@@ -120,7 +121,7 @@ def extract_upload_path(name: str, path: str, content_type: str | None = None) -
             if member.file_size > MAX_FILE_BYTES or total + member.file_size > MAX_ARCHIVE_BYTES:
                 raise ValueError("ZIP uncompressed size exceeds the safe processing limit")
             total += member.file_size
-            if member.file_size > MAX_IN_MEMORY_MEMBER_BYTES:
+            if member.file_size > MAX_IN_MEMORY_MEMBER_BYTES or (member_path.suffix.lower() == ".pdf" and member.file_size > MAX_PDF_TEXT_BYTES):
                 results.append(extract_file(str(member_path), b"", None, archive_member=str(member_path), declared_size=member.file_size, skip_content=True))
             else:
                 with archive.open(member, "r") as handle:
