@@ -25,7 +25,7 @@ RULES = {
 
 
 def assess(modules: list[CreditModule], documents: list[dict[str, Any]], target: str = "Gold") -> dict[str, Any]:
-    corpus = "\n".join(f"{d.get('filename','')} {d.get('text','')} {' '.join(d.get('drawing', {}).get('keyword_hits', []))}" for d in documents).lower()
+    corpus = "\n".join(f"{d.get('filename','')} {d.get('text_preview', d.get('text',''))} {' '.join(d.get('drawing', {}).get('keyword_hits', []))}" for d in documents).lower()
     findings: list[dict] = []
     results: list[dict] = []
     evidence_points = 0
@@ -36,7 +36,7 @@ def assess(modules: list[CreditModule], documents: list[dict[str, Any]], target:
         pattern, action, owner = RULES.get(module.module_type, (module.credit_name.lower(), "Map this credit to official evidence requirements.", "LEED consultant"))
         import re
         hit = bool(re.search(pattern, corpus, flags=re.I))
-        refs = [d["filename"] for d in documents if any(k.lower() in f"{d.get('filename','')} {d.get('text','')}".lower() for k in pattern.split("|"))][:5]
+        refs = [d["filename"] for d in documents if any(k.lower() in f"{d.get('filename','')} {d.get('text_preview', d.get('text',''))}".lower().replace("_", " ") for k in pattern.split("|"))][:5]
         status = "likely" if hit else "at_risk"
         confidence = 0.78 if hit else 0.12
         earned = points if hit else 0

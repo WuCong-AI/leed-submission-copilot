@@ -215,7 +215,7 @@ class MemoryStore:
             requirements, actions = self._submission_requirement_review(module, docs)
             pattern, default_action, default_owner = RULES.get(module.module_type, (module.credit_name.lower(), f"Map the uploaded evidence to the {module.credit_name} supporting-document list.", "leed_consultant"))
             tokens = [token.strip().lower() for token in pattern.split("|")]
-            matched = [doc for doc in docs if any(token in f"{doc.get('filename', '')} {doc.get('text_preview', '')} {' '.join(doc.get('drawing', {}).get('keyword_hits', []))}".lower() for token in tokens)]
+            matched = [doc for doc in docs if any(token in re.sub(r"[_./\\-]+", " ", f"{doc.get('filename', '')} {doc.get('text_preview', '')} {' '.join(doc.get('drawing', {}).get('keyword_hits', []))}").lower() for token in tokens)]
             missing_requirements = [item for item in requirements if item["status"] == "missing"]
             source_requirements = [item for item in requirements if item["status"] == "needs_official_source"]
             refs = [{"document_id": str(doc["id"]), "filename": doc["filename"]} for doc in matched[:8]]
@@ -309,7 +309,7 @@ class MemoryStore:
             keywords = requirement.get("_keywords") or [token for token in re.findall(r"[a-z0-9]+", name.lower()) if len(token) > 3]
             matches = []
             for document in documents:
-                haystack = f"{document.get('filename', '')} {document.get('text_preview', '')}".lower()
+                haystack = re.sub(r"[_./\\-]+", " ", f"{document.get('filename', '')} {document.get('text_preview', '')}").lower()
                 extension = str(document.get("extension", "")).lower().lstrip(".")
                 if extension in accepted and any(keyword.lower() in haystack for keyword in keywords):
                     matches.append(document)
