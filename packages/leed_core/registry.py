@@ -74,6 +74,9 @@ class RegistryService:
     def get_credit(self, version: str, family: str, adaptation: str, credit_id: str) -> CreditModule:
         path = self.module_root(version, family, adaptation) / credit_id / "credit.yaml"
         if not path.exists():
+            for cid, name, category, prereq, points, module_type in self.BUILTIN_CATALOG:
+                if cid == credit_id:
+                    return CreditModule(version, family, adaptation, cid, cid, name, category, prereq, points, module_type, "builtin/catalog", "heuristic_builtin", {"official_source_status": "heuristic_builtin", "requirement_summary": "Upload official rating-system materials before submission."})
             raise KeyError(f"Registry credit module not found: {version}/{family}/{adaptation}/{credit_id}")
         return self._load(path)
 
