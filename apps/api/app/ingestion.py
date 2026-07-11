@@ -15,7 +15,6 @@ MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 # Render's Starter instance has a 512 MB memory ceiling. Do not materialize
 # very large drawing members or PDFs in Python just to extract a small preview.
 MAX_IN_MEMORY_MEMBER_BYTES = 8 * 1024 * 1024
-MAX_PDF_TEXT_BYTES = 2 * 1024 * 1024
 TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".xml", ".ifc", ".dxf", ".html", ".log"}
 DRAWING_EXTENSIONS = {".pdf", ".dwg", ".dxf", ".rvt", ".rfa", ".ifc", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
@@ -41,7 +40,7 @@ def _drawing_hints(name: str, text: str) -> dict[str, Any]:
 def _extract_pdf(data: bytes) -> tuple[str, int, list[str]]:
     warnings: list[str] = []
     if len(data) > MAX_IN_MEMORY_MEMBER_BYTES:
-        return "", 0, ["PDF text extraction skipped for a large file; filename and size metadata were indexed."]
+        return "", 0, ["Large PDF indexed in metadata mode; text preview is deferred to keep online processing stable."]
     try:
         from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(data), strict=False)
@@ -64,7 +63,7 @@ def extract_file(name: str, data: bytes, content_type: str | None = None, archiv
     ext = PurePosixPath(clean_name).suffix.lower()
     text, page_count, warnings = "", 0, []
     if skip_content:
-        warnings.append("Content extraction skipped for a large archive member; filename and drawing metadata were retained.")
+        warnings.append("Large drawing indexed in metadata mode; text preview is deferred to keep online processing stable.")
     elif ext in TEXT_EXTENSIONS:
         text = data[:2_000_000].decode("utf-8", errors="replace")
     elif ext == ".pdf":
