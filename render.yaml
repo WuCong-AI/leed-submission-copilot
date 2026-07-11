@@ -22,6 +22,10 @@ services:
         fromDatabase:
           name: leed-submission-copilot-db
           property: connectionString
+    disk:
+      name: leed-submission-copilot-data
+      mountPath: /data
+      sizeGB: 10
   - type: web
     name: leed-submission-copilot-web
     runtime: docker

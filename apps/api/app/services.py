@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import os
 import tempfile
+import threading
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -27,6 +29,14 @@ class MemoryStore:
     """MVP persistence adapter. Replace behind this interface with SQLAlchemy repositories."""
     def __init__(self, registry: RegistryService | None = None) -> None:
         self.registry = registry or RegistryService()
+        self.data_root = Path(os.getenv("LOCAL_STORAGE_PATH", "/workspace/data/uploads"))
+        self.raw_root = self.data_root / "raw"
+        self.staging_root = self.data_root / "staging"
+        self.data_root.mkdir(parents=True, exist_ok=True)
+        self.raw_root.mkdir(parents=True, exist_ok=True)
+        self.staging_root.mkdir(parents=True, exist_ok=True)
+        self.state_path = self.data_root / "state.json"
+        self._state_lock = threading.RLock()
         self.projects: dict[UUID, ProjectSummary] = {}
         self.scorecards: dict[UUID, dict[str, ProjectCreditStatus]] = {}
         self.documents: dict[UUID, list[dict]] = {}
@@ -34,6 +44,35 @@ class MemoryStore:
         self.analyses: dict[UUID, dict] = {}
         self.upload_sessions: dict[str, dict] = {}
         self.upload_jobs: dict[str, dict] = {}
+        self._load_state()
+
+    def _save_state(self) -> None:
+        """Persist the MVP state so Render restarts do not erase projects and evidence index."""
+        with self._state_lock:
+            payload = {
+                "projects": [project.model_dump(mode="json") for project in self.projects.values()],
+                "scorecards": {str(project_id): {credit_id: status.model_dump(mode="json") for credit_id, status in rows.items()} for project_id, rows in self.scorecards.items()},
+                "documents": {str(project_id): [{**record, "id": str(record["id"])} for record in rows] for project_id, rows in self.documents.items()},
+                "chunks": {str(document_id): rows for document_id, rows in self.chunks.items()},
+                "analyses": {str(project_id): result for project_id, result in self.analyses.items()},
+            }
+            temp_path = self.state_path.with_suffix(".tmp")
+            temp_path.write_text(json.dumps(payload, ensure_ascii=False, default=str), encoding="utf-8")
+            temp_path.replace(self.state_path)
+
+    def _load_state(self) -> None:
+        if not self.state_path.exists():
+            return
+        try:
+            payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+            self.projects = {UUID(item["id"]): ProjectSummary.model_validate(item) for item in payload.get("projects", [])}
+            self.scorecards = {UUID(project_id): {credit_id: ProjectCreditStatus.model_validate(status) for credit_id, status in rows.items()} for project_id, rows in payload.get("scorecards", {}).items()}
+            self.documents = {UUID(project_id): [{**record, "id": UUID(record["id"])} for record in rows] for project_id, rows in payload.get("documents", {}).items()}
+            self.chunks = {UUID(document_id): rows for document_id, rows in payload.get("chunks", {}).items()}
+            self.analyses = {UUID(project_id): result for project_id, result in payload.get("analyses", {}).items()}
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            # A corrupt state file should not prevent the API from starting.
+            self.projects, self.scorecards, self.documents, self.chunks, self.analyses = {}, {}, {}, {}, {}
 
     def create_project(self, input: ProjectCreate) -> ProjectSummary:
         project = ProjectSummary(**input.model_dump(), id=uuid4(), created_at=datetime.now(timezone.utc))
@@ -46,6 +85,7 @@ class MemoryStore:
                 risk_level="needs_official_source" if module.max_points is None else "medium",
             ) for module in modules
         }
+        self._save_state()
         return project
 
     def project(self, project_id: UUID) -> ProjectSummary:
@@ -60,17 +100,28 @@ class MemoryStore:
     def update_credit(self, project_id: UUID, credit_id: str, status: ProjectCreditStatus) -> ProjectCreditStatus:
         self.registry.get_credit(*registry_key(self.project(project_id)), credit_id)
         self.scorecards[project_id][credit_id] = status
+        self._save_state()
         return status
 
     async def add_document(self, project_id: UUID, upload: UploadFile, metadata: DocumentUpload) -> dict:
         content = await upload.read()
         filename = Path(upload.filename or "upload.bin").name
+        raw_path = self.raw_root / str(project_id) / f"{uuid4()}-{filename}"
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_path.write_bytes(content)
         extracted = extract_upload(filename, content, upload.content_type)
-        return self._store_extracted(project_id, extracted, metadata, filename.lower().endswith(".zip"))
+        return self._store_extracted(project_id, extracted, metadata, filename.lower().endswith(".zip"), str(raw_path))
 
-    def add_document_path(self, project_id: UUID, filename: str, path: str, metadata: DocumentUpload) -> dict:
+    def add_document_path(self, project_id: UUID, filename: str, path: str, metadata: DocumentUpload, raw_path: str | None = None) -> dict:
+        if raw_path is None:
+            raw_file = self.raw_root / str(project_id) / f"{uuid4()}-{Path(filename).name}"
+            raw_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "rb") as source, open(raw_file, "wb") as target:
+                while chunk := source.read(8 * 1024 * 1024):
+                    target.write(chunk)
+            raw_path = str(raw_file)
         extracted = extract_upload_path(filename, path)
-        return self._store_extracted(project_id, extracted, metadata, filename.lower().endswith(".zip"))
+        return self._store_extracted(project_id, extracted, metadata, filename.lower().endswith(".zip"), raw_path)
 
     def process_upload_job(self, job_id: str, project_id: UUID, filename: str, path: str, metadata: DocumentUpload) -> None:
         job = self.upload_jobs.get(job_id)
@@ -88,14 +139,15 @@ class MemoryStore:
             except OSError:
                 pass
 
-    def _store_extracted(self, project_id: UUID, extracted: list[dict], metadata: DocumentUpload, archive: bool = False) -> dict:
+    def _store_extracted(self, project_id: UUID, extracted: list[dict], metadata: DocumentUpload, archive: bool = False, storage_path: str | None = None) -> dict:
         created = []
         for item in extracted:
             doc_id = uuid4()
-            record = {"id": doc_id, "filename": item["filename"], "archive_member": item.get("archive_member"), "document_type": metadata.document_type, "phase": metadata.phase, "discipline": metadata.discipline, "related_credit_id": metadata.related_credit_id, "processing_status": "processed", "size_bytes": item["size_bytes"], "mime_type": item["mime_type"], "extension": item["extension"], "page_count": item["page_count"], "warnings": item["warnings"], "drawing": item["drawing"], "text_preview": item["text"][:1500]}
+            record = {"id": doc_id, "filename": item["filename"], "archive_member": item.get("archive_member"), "document_type": metadata.document_type, "phase": metadata.phase, "discipline": metadata.discipline, "related_credit_id": metadata.related_credit_id, "processing_status": "processed", "size_bytes": item["size_bytes"], "mime_type": item["mime_type"], "extension": item["extension"], "page_count": item["page_count"], "warnings": item["warnings"], "drawing": item["drawing"], "text_preview": item["text"][:1500], "storage_path": storage_path}
             self.documents[project_id].append(record)
             self.chunks[doc_id] = [{"chunk_index": 0, "chunk_text": item["text"][:10000], "source_refs": [{"filename": item["filename"], "archive_member": item.get("archive_member"), "document_id": str(doc_id)}]}]
             created.append(record)
+        self._save_state()
         return {"uploaded": created, "count": len(created), "archive": archive}
 
     def evidence(self, project_id: UUID, credit_id: str) -> list[EvidenceItem]:

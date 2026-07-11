@@ -128,10 +128,19 @@ async def upload_chunk(project_id: UUID, background_tasks: BackgroundTasks, chun
     session_id = upload_id or str(uuid4())
     session = store.upload_sessions.get(session_id)
     if session is None:
-        path = os.path.join(tempfile.gettempdir(), f"leed-upload-{session_id}.part")
+        path = os.path.join(store.staging_root, f"leed-upload-{session_id}.part")
         session = {"path": path, "filename": os.path.basename(filename), "next": 0, "total": total_chunks, "project_id": project_id}
         store.upload_sessions[session_id] = session
-    if session["project_id"] != project_id or session["total"] != total_chunks or chunk_index != session["next"]:
+    if session["project_id"] != project_id or session["total"] != total_chunks:
+        raise HTTPException(status_code=409, detail=f"Upload session {session_id} does not match this project or file")
+    # A response can be lost after the server writes a chunk. Treat a retry of
+    # an already accepted chunk as an acknowledgement instead of appending it
+    # a second time (which used to surface as Failed to fetch in the browser).
+    if session.get("complete") and session.get("job_id"):
+        return {"upload_id": session_id, "complete": True, "processing": True, "job_id": session["job_id"], "uploaded": [], "count": 0}
+    if chunk_index < session["next"]:
+        return {"upload_id": session_id, "complete": False, "received_chunks": session["next"], "total_chunks": total_chunks}
+    if chunk_index != session["next"]:
         raise HTTPException(status_code=409, detail=f"Expected chunk {session['next']}")
     with open(session["path"], "ab") as handle:
         handle.write(payload)
@@ -142,7 +151,10 @@ async def upload_chunk(project_id: UUID, background_tasks: BackgroundTasks, chun
     job_id = str(uuid4())
     store.upload_jobs[job_id] = {"project_id": project_id, "status": "queued", "filename": session["filename"], "uploaded": [], "count": 0}
     background_tasks.add_task(store.process_upload_job, job_id, project_id, session["filename"], session["path"], metadata)
-    store.upload_sessions.pop(session_id, None)
+    # Keep a small completed-session marker so a retry of the final request
+    # returns the original job rather than creating a second archive.
+    session["complete"] = True
+    session["job_id"] = job_id
     return {"upload_id": session_id, "complete": True, "processing": True, "job_id": job_id, "uploaded": [], "count": 0}
 
 
