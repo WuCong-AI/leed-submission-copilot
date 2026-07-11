@@ -12,6 +12,9 @@ from typing import Any
 MAX_FILE_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_FILES = 500
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
+# Render's Starter instance has a 512 MB memory ceiling. Do not materialize
+# very large drawing members or PDFs in Python just to extract a small preview.
+MAX_IN_MEMORY_MEMBER_BYTES = 32 * 1024 * 1024
 TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".xml", ".ifc", ".dxf", ".html", ".log"}
 DRAWING_EXTENSIONS = {".pdf", ".dwg", ".dxf", ".rvt", ".rfa", ".ifc", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
@@ -36,6 +39,8 @@ def _drawing_hints(name: str, text: str) -> dict[str, Any]:
 
 def _extract_pdf(data: bytes) -> tuple[str, int, list[str]]:
     warnings: list[str] = []
+    if len(data) > MAX_IN_MEMORY_MEMBER_BYTES:
+        return "", 0, ["PDF text extraction skipped for a large file; filename and size metadata were indexed."]
     try:
         from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(data), strict=False)
@@ -51,13 +56,15 @@ def _extract_pdf(data: bytes) -> tuple[str, int, list[str]]:
         return "", 0, warnings
 
 
-def extract_file(name: str, data: bytes, content_type: str | None = None, archive_member: str | None = None) -> dict[str, Any]:
+def extract_file(name: str, data: bytes, content_type: str | None = None, archive_member: str | None = None, *, declared_size: int | None = None, skip_content: bool = False) -> dict[str, Any]:
     if len(data) > MAX_FILE_BYTES:
         raise ValueError(f"{name} exceeds the {MAX_FILE_BYTES // (1024 * 1024)} MB file limit")
     clean_name = PurePosixPath(name.replace("\\", "/")).name or "upload.bin"
     ext = PurePosixPath(clean_name).suffix.lower()
     text, page_count, warnings = "", 0, []
-    if ext in TEXT_EXTENSIONS:
+    if skip_content:
+        warnings.append("Content extraction skipped for a large archive member; filename and drawing metadata were retained.")
+    elif ext in TEXT_EXTENSIONS:
         text = data[:2_000_000].decode("utf-8", errors="replace")
     elif ext == ".pdf":
         text, page_count, warnings = _extract_pdf(data)
@@ -66,7 +73,7 @@ def extract_file(name: str, data: bytes, content_type: str | None = None, archiv
     elif ext in {".dwg", ".rvt", ".rfa"}:
         warnings.append(f"{ext.upper()} geometry is retained as metadata; connect a CAD/BIM parser for geometry-level quantities.")
     hints = _drawing_hints(clean_name, text)
-    return {"filename": clean_name, "archive_member": archive_member, "mime_type": content_type or mimetypes.guess_type(clean_name)[0] or "application/octet-stream", "extension": ext, "size_bytes": len(data), "text": text[:100_000], "page_count": page_count, "warnings": warnings, "drawing": hints}
+    return {"filename": clean_name, "archive_member": archive_member, "mime_type": content_type or mimetypes.guess_type(clean_name)[0] or "application/octet-stream", "extension": ext, "size_bytes": declared_size if declared_size is not None else len(data), "text": text[:100_000], "page_count": page_count, "warnings": warnings, "drawing": hints}
 
 
 def extract_upload(name: str, data: bytes, content_type: str | None = None) -> list[dict[str, Any]]:
@@ -87,8 +94,11 @@ def extract_upload(name: str, data: bytes, content_type: str | None = None) -> l
             if member.file_size > MAX_FILE_BYTES or total + member.file_size > MAX_ARCHIVE_BYTES:
                 raise ValueError("ZIP uncompressed size exceeds the safe processing limit")
             total += member.file_size
-            payload = archive.read(member)
-            results.append(extract_file(str(path), payload, None, archive_member=str(path)))
+            if member.file_size > MAX_IN_MEMORY_MEMBER_BYTES:
+                results.append(extract_file(str(path), b"", None, archive_member=str(path), declared_size=member.file_size, skip_content=True))
+            else:
+                payload = archive.read(member)
+                results.append(extract_file(str(path), payload, None, archive_member=str(path)))
     return results
 
 
@@ -110,6 +120,9 @@ def extract_upload_path(name: str, path: str, content_type: str | None = None) -
             if member.file_size > MAX_FILE_BYTES or total + member.file_size > MAX_ARCHIVE_BYTES:
                 raise ValueError("ZIP uncompressed size exceeds the safe processing limit")
             total += member.file_size
-            with archive.open(member, "r") as handle:
-                results.append(extract_file(str(member_path), handle.read(), None, archive_member=str(member_path)))
+            if member.file_size > MAX_IN_MEMORY_MEMBER_BYTES:
+                results.append(extract_file(str(member_path), b"", None, archive_member=str(member_path), declared_size=member.file_size, skip_content=True))
+            else:
+                with archive.open(member, "r") as handle:
+                    results.append(extract_file(str(member_path), handle.read(), None, archive_member=str(member_path)))
     return results
