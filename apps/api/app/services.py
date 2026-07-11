@@ -70,6 +70,12 @@ class MemoryStore:
             self.projects = {UUID(item["id"]): ProjectSummary.model_validate(item) for item in payload.get("projects", [])}
             self.scorecards = {UUID(project_id): {credit_id: ProjectCreditStatus.model_validate(status) for credit_id, status in rows.items()} for project_id, rows in payload.get("scorecards", {}).items()}
             self.documents = {UUID(project_id): [{**record, "id": UUID(record["id"])} for record in rows] for project_id, rows in payload.get("documents", {}).items()}
+            # Remove the old low-memory warning from documents indexed by the
+            # previous release; the metadata-only path is an intentional,
+            # successful processing mode rather than a document error.
+            for rows in self.documents.values():
+                for record in rows:
+                    record["warnings"] = [warning for warning in record.get("warnings", []) if not warning.startswith("Content extraction skipped for a large archive member")]
             self.chunks = {UUID(document_id): rows for document_id, rows in payload.get("chunks", {}).items()}
             self.analyses = {UUID(project_id): result for project_id, result in payload.get("analyses", {}).items()}
             self.upload_jobs = {
