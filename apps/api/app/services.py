@@ -13,7 +13,7 @@ from fastapi import UploadFile
 
 from packages.leed_core.registry import CreditModule, RegistryService
 from .schemas import (
-    CommentRiskResponse, DocumentUpload, EvidenceItem, PreAssessmentRequest,
+    CommentRiskResponse, DesignGuideResponse, DocumentUpload, EvidenceItem, PreAssessmentRequest,
     PreAssessmentResponse, ProjectCreate, ProjectCreditStatus, ProjectSummary,
     ReviewFinding, StageReviewRequest, StageReviewResponse, SubmissionPacketResponse,
     TenderRequirementResponse,
@@ -215,6 +215,28 @@ class MemoryStore:
             findings.append(ReviewFinding(credit_id=credit_id, phase=request.phase, severity="high" if evidence[0].evidence_status == "missing" else "medium", finding_type="missing_evidence" if evidence[0].evidence_status == "missing" else "needs_official_source", finding_text="Required evidence is not verified against an official registry source." if evidence[0].evidence_status == "missing" else "Evidence is uploaded but needs registry-based validation.", recommended_action="Assign the evidence owner and validate against evidence_schema.json after official fields are supplied.", responsible_discipline="leed_consultant", evidence_refs=evidence[0].source_refs, confidence=evidence[0].confidence))
         return StageReviewResponse(project_summary=f"{len(findings)} registry-driven findings for {request.phase}.", findings=findings, discipline_actions={"leed_consultant": [finding.recommended_action for finding in findings]}, assumptions=["Deterministic MVP; no LLM or unverified LEED threshold is used."])
 
+    def design_guide(self, project_id: UUID, phase: str = "concept") -> DesignGuideResponse:
+        project = self.project(project_id)
+        modules = self.registry.list_credits(*registry_key(project))
+        available = {module.module_type for module in modules}
+        pillars = [
+            {"id": "decarbonization", "label": "Decarbonization", "color": "#0f766e", "objective": "Set an operational and embodied-carbon budget before fixing the concept.", "decisions": ["Define energy model baseline and carbon boundary", "Compare passive design, electrification, renewables and material options"], "deliverables": ["Concept energy/carbon brief", "Embodied-carbon/LCA assumptions register"], "owners": ["architect", "mep_engineer", "leed_consultant"]},
+            {"id": "health", "label": "Health & Wellbeing", "color": "#7c3aed", "objective": "Protect indoor air quality, daylight, thermal comfort and occupant experience from the first layout.", "decisions": ["Reserve ventilation, filtration and entryway-control zones", "Set daylight, glare, acoustics and low-emitting material targets"], "deliverables": ["IAQ strategy diagram", "Daylight/comfort concept targets", "Low-emitting materials schedule"], "owners": ["architect", "mep_engineer"]},
+            {"id": "biodiversity", "label": "Biodiversity & Ecosystems", "color": "#15803d", "objective": "Avoid ecological harm and use the site concept to restore habitat and climate resilience.", "decisions": ["Map existing habitat, soil, water and heat-island risks", "Set native planting, stormwater and light-pollution principles"], "deliverables": ["Site ecology constraints plan", "Landscape and stormwater concept"], "owners": ["landscape_architect", "civil_engineer"]},
+        ]
+        sequence = [
+            {"step": 1, "title": "Set project priorities", "description": "Confirm owner goals, certification target, site boundary, floor area and carbon/health/ecology priorities.", "evidence": ["Owner project requirements", "Integrative workshop agenda and decisions"], "owner": "leed_consultant", "status": "start"},
+            {"step": 2, "title": "Lock site and climate response", "description": "Complete site, transport, ecology, flood, heat and stormwater constraints before massing is fixed.", "evidence": ["Site assessment", "Climate-risk and ecology plan", "Transport and parking assumptions"], "owner": "architect", "status": "next"},
+            {"step": 3, "title": "Test passive and energy options", "description": "Compare orientation, envelope, shading, HVAC, electrification, renewables, metering and energy-model baselines.", "evidence": ["Concept energy model", "Energy/carbon option matrix", "Commissioning strategy"], "owner": "mep_engineer", "status": "next"},
+            {"step": 4, "title": "Coordinate water and materials", "description": "Set water budgets, fixture strategy, irrigation, material transparency, EPD and circularity requirements.", "evidence": ["Water balance", "Outline specification", "EPD/material data request"], "owner": "mep_engineer / contractor", "status": "next"},
+            {"step": 5, "title": "Protect occupant wellbeing", "description": "Translate IAQ, daylight, thermal comfort, acoustics and low-emitting goals into room layouts and specifications.", "evidence": ["IAQ zoning", "Daylight targets", "Low-emitting schedule"], "owner": "architect", "status": "next"},
+            {"step": 6, "title": "Issue the concept decision log", "description": "Record each option, selected design, owner, assumptions, unresolved risk and required next-phase evidence.", "evidence": ["Concept LEED decision log", "Responsibility matrix", "Open-issues register"], "owner": "leed_consultant", "status": "gate"},
+        ]
+        deliverables = []
+        for pillar in pillars:
+            deliverables.extend({"pillar": pillar["label"], "name": item, "owner": ", ".join(pillar["owners"]), "phase": phase, "status": "required"} for item in pillar["deliverables"])
+        return DesignGuideResponse(project_id=project_id, phase=phase, title=f"{project.name} · Concept LEED design guide", summary=f"{project.leed_version} {project.rating_family}/{project.adaptation} · target {project.target_certification}. Use this sequence to make design decisions before schematic design.", pillars=pillars, decision_sequence=sequence, concept_deliverables=deliverables)
+
     def submission_packet(self, project_id: UUID, credit_id: str) -> SubmissionPacketResponse:
         project = self.project(project_id)
         module = self.registry.get_credit(*registry_key(project), credit_id)
@@ -271,11 +293,14 @@ class MemoryStore:
             matched_files = [{"document_id": str(document["id"]), "filename": document["filename"]} for document in matches]
             if status == "missing":
                 action = f"Add {name}; accepted types: {', '.join(accepted) or 'project evidence'}. Include: {', '.join(fields) or 'scope, calculation, conclusion'}; responsible party: {requirement.get('responsible_discipline', 'leed_consultant')}."
+                steps = [f"Create or export a {', '.join(accepted) or 'project evidence'} file named with the credit ID and evidence type.", f"Add a dedicated section/table for: {', '.join(fields) or 'project scope, calculation, conclusion'}.", "Add page, drawing-sheet or calculation-cell references for every claim.", f"Assign final review to {requirement.get('responsible_discipline', 'leed_consultant')} before submission."]
             elif status == "needs_official_source":
                 action = f"For {name}, cite the official {module.leed_version} {module.rating_family}/{module.adaptation} clause and map each required field ({', '.join(fields)}) to a page, sheet or calculation cell."
+                steps = [f"Insert the official {module.leed_version} {module.rating_family}/{module.adaptation} credit/prerequisite reference in the narrative.", f"Map each field ({', '.join(fields)}) to a page, sheet or calculation cell.", "Reconcile the narrative, drawings, calculations and scorecard scope before upload."]
             else:
                 action = f"Revise {name} to add explicit clause citation and page/sheet references for: {', '.join(fields) or 'scope and conclusion'}."
-            review.append({"requirement": name, "status": status, "required_phase": requirement.get("required_phase", "submission"), "accepted_file_types": accepted, "required_fields": fields, "responsible_discipline": requirement.get("responsible_discipline", "leed_consultant"), "matched_files": matched_files, "modification_comment": action})
+                steps = [f"Add the official clause reference to {name}.", f"Add page/sheet/cell citations for: {', '.join(fields) or 'scope and conclusion'}.", "Check consistency with project boundary, area and related credits."]
+            review.append({"requirement": name, "status": status, "required_phase": requirement.get("required_phase", "submission"), "accepted_file_types": accepted, "required_fields": fields, "validation_rules": requirement.get("validation_rules", []), "responsible_discipline": requirement.get("responsible_discipline", "leed_consultant"), "matched_files": matched_files, "modification_comment": action, "specific_modification_steps": steps})
             actions.append(action)
         return review, actions
 

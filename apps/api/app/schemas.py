@@ -134,6 +134,16 @@ class SubmissionPacketResponse(BaseModel):
     corrective_action_plan: list[str] = Field(default_factory=list)
 
 
+class DesignGuideResponse(BaseModel):
+    project_id: UUID
+    phase: ProjectPhase
+    title: str
+    summary: str
+    pillars: list[dict] = Field(default_factory=list)
+    decision_sequence: list[dict] = Field(default_factory=list)
+    concept_deliverables: list[dict] = Field(default_factory=list)
+
+
 class CommentRiskResponse(BaseModel):
     credit_id: str
     risk_score: int = Field(ge=0, le=5)

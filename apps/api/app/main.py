@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from packages.leed_core.registry import RegistryService
 from .schemas import (
-    AnalysisResponse, CommentRiskResponse, DocumentUpload, PreAssessmentRequest, PreAssessmentResponse,
+    AnalysisResponse, CommentRiskResponse, DesignGuideResponse, DocumentUpload, PreAssessmentRequest, PreAssessmentResponse,
     ProjectCreate, ProjectCreditStatus, ProjectSummary, StageReviewRequest,
     StageReviewResponse, SubmissionPacketResponse, TenderRequirementResponse,
 )
@@ -237,6 +237,12 @@ def credit_tender(project_id: UUID, credit_id: str, package_name: str = "General
 def submission_packet(project_id: UUID, credit_id: str) -> SubmissionPacketResponse:
     get_project(project_id)
     return store.submission_packet(project_id, credit_id)
+
+
+@app.get("/api/projects/{project_id}/design-guide", response_model=DesignGuideResponse)
+def design_guide(project_id: UUID, phase: str = "concept") -> DesignGuideResponse:
+    get_project(project_id)
+    return store.design_guide(project_id, phase)
 
 
 @app.post("/api/projects/{project_id}/credits/{credit_id}/comment-risk", response_model=CommentRiskResponse)
