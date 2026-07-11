@@ -130,6 +130,8 @@ class SubmissionPacketResponse(BaseModel):
     missing_items: list[str]
     assumptions: list[str]
     reviewer_risk_report: dict
+    requirement_review: list[dict] = Field(default_factory=list)
+    corrective_action_plan: list[str] = Field(default_factory=list)
 
 
 class CommentRiskResponse(BaseModel):

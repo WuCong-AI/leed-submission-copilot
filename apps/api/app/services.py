@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import os
+import re
 import tempfile
 import threading
 from pathlib import Path
@@ -215,9 +216,68 @@ class MemoryStore:
         return StageReviewResponse(project_summary=f"{len(findings)} registry-driven findings for {request.phase}.", findings=findings, discipline_actions={"leed_consultant": [finding.recommended_action for finding in findings]}, assumptions=["Deterministic MVP; no LLM or unverified LEED threshold is used."])
 
     def submission_packet(self, project_id: UUID, credit_id: str) -> SubmissionPacketResponse:
+        project = self.project(project_id)
+        module = self.registry.get_credit(*registry_key(project), credit_id)
         evidence = self.evidence(project_id, credit_id)
-        missing = [item.evidence_type for item in evidence if item.evidence_status == "missing"]
-        return SubmissionPacketResponse(credit_id=credit_id, narrative_markdown=f"# {credit_id}\n\n## Evidence-backed narrative\nNEED_OFFICIAL_SOURCE: narrative structure is ready, but no official requirement text or accepted evidence is available.", attachment_index=[ref for item in evidence for ref in item.source_refs], evidence_manifest=evidence, missing_items=missing, assumptions=["No missing evidence was fabricated."], reviewer_risk_report=self.comment_risk(project_id, credit_id).model_dump())
+        requirement_review, corrective_actions = self._submission_requirement_review(module, self.documents[project_id])
+        missing = [item["requirement"] for item in requirement_review if item["status"] == "missing"]
+        source_gaps = [item["requirement"] for item in requirement_review if item["status"] == "needs_official_source"]
+        return SubmissionPacketResponse(credit_id=credit_id, narrative_markdown=f"# {credit_id}\n\n## Evidence-backed narrative\nDraft prepared for {module.credit_name}. Each claim must be mapped to the requirement review below before formal submission.", attachment_index=[ref for item in evidence for ref in item.source_refs], evidence_manifest=evidence, missing_items=missing + source_gaps, assumptions=[f"Review path: {project.leed_version}/{project.rating_family}/{project.adaptation}.", "Automated checks are evidence-matching controls, not a GBCI/USGBC certification decision."], reviewer_risk_report=self.comment_risk(project_id, credit_id).model_dump(), requirement_review=requirement_review, corrective_action_plan=corrective_actions)
+
+    def _submission_requirement_review(self, module: CreditModule, documents: list[dict]) -> tuple[list[dict], list[str]]:
+        """Compare uploaded evidence to the credit's supporting-document schema."""
+        requirements: list[dict] = []
+        repo_root = Path(__file__).resolve().parents[3]
+        schema_path = repo_root / "data" / module.registry_path / "evidence_schema.json"
+        if schema_path.exists():
+            try:
+                requirements = json.loads(schema_path.read_text(encoding="utf-8")).get("required", [])
+            except (OSError, ValueError, TypeError):
+                requirements = []
+        if not requirements:
+            defaults = {
+                "integrative_process": ("integrative workshop record", ["pdf", "docx", "xlsx"], ["workshop", "integrative", "meeting", "agenda", "coordination"], "leed_consultant"),
+                "location_transportation": ("location and transportation plan", ["pdf", "dwg", "dxf", "xlsx"], ["site", "parking", "transit", "transport", "bike", "ev"], "architect"),
+                "site": ("site assessment and sustainable sites plan", ["pdf", "dwg", "dxf", "xlsx"], ["site", "landscape", "stormwater", "grading", "habitat"], "landscape_architect"),
+                "biodiversity": ("biodiversity and ecosystem conservation plan", ["pdf", "dwg", "dxf", "xlsx"], ["biodiversity", "ecosystem", "habitat", "planting", "native", "landscape"], "landscape_architect"),
+                "water": ("water use calculation and fixture schedule", ["pdf", "xlsx", "docx"], ["water", "fixture", "plumbing", "irrigation", "meter"], "mep_engineer"),
+                "energy": ("energy model and commissioning evidence", ["pdf", "xlsx", "docx"], ["energy", "model", "hvac", "commission", "meter", "chiller"], "mep_engineer"),
+                "carbon": ("operational and embodied carbon calculation", ["pdf", "xlsx", "docx"], ["carbon", "lca", "embodied", "energy", "epd"], "leed_consultant"),
+                "materials": ("materials inventory and manufacturer EPDs", ["pdf", "xlsx", "docx"], ["epd", "material", "product", "lca", "recycled"], "contractor"),
+                "iaq": ("indoor air quality and ventilation documentation", ["pdf", "dwg", "xlsx", "docx"], ["iaq", "air", "ventilation", "hvac", "filter", "smoke"], "mep_engineer"),
+                "low_emitting": ("low-emitting materials schedule and VOC evidence", ["pdf", "xlsx", "docx"], ["low-emitting", "voc", "material", "adhesive", "paint"], "architect"),
+                "daylight": ("daylighting simulation and annotated plans", ["pdf", "xlsx", "dwg", "dxf"], ["daylight", "glare", "simulation", "window", "floor plan"], "architect"),
+                "commissioning": ("commissioning plan, report and issues log", ["pdf", "docx", "xlsx"], ["commission", "cx", "issues log", "functional"], "commissioning_agent"),
+                "health": ("health and wellbeing assessment", ["pdf", "xlsx", "docx"], ["health", "wellbeing", "occupant", "survey", "iaq"], "leed_consultant"),
+                "resilience": ("climate risk and resilience assessment", ["pdf", "xlsx", "docx"], ["resilience", "climate", "flood", "heat", "hazard"], "architect"),
+            }
+            default = defaults.get(module.module_type, (f"{module.credit_name} supporting documentation", ["pdf", "docx", "xlsx"], [module.credit_name.lower()], "leed_consultant"))
+            requirements = [{"evidence_type": default[0], "accepted_file_types": default[1], "required_fields": ["official clause reference", "project scope", "calculation or narrative conclusion"], "required_phase": "submission", "responsible_discipline": default[3], "_keywords": default[2]}]
+        review: list[dict] = []
+        actions: list[str] = []
+        for requirement in requirements:
+            name = str(requirement.get("evidence_type", "supporting document"))
+            accepted = [str(item).lower().lstrip(".") for item in requirement.get("accepted_file_types", [])]
+            fields = [str(item) for item in requirement.get("required_fields", [])]
+            keywords = requirement.get("_keywords") or [token for token in re.findall(r"[a-z0-9]+", name.lower()) if len(token) > 3]
+            matches = []
+            for document in documents:
+                haystack = f"{document.get('filename', '')} {document.get('text_preview', '')}".lower()
+                extension = str(document.get("extension", "")).lower().lstrip(".")
+                if extension in accepted and any(keyword.lower() in haystack for keyword in keywords):
+                    matches.append(document)
+            official_required = any("NEED_OFFICIAL_SOURCE" in field or "official" in field.lower() for field in fields)
+            status = "missing" if not matches else ("needs_official_source" if official_required else "provided")
+            matched_files = [{"document_id": str(document["id"]), "filename": document["filename"]} for document in matches]
+            if status == "missing":
+                action = f"Add {name}; accepted types: {', '.join(accepted) or 'project evidence'}. Include: {', '.join(fields) or 'scope, calculation, conclusion'}; responsible party: {requirement.get('responsible_discipline', 'leed_consultant')}."
+            elif status == "needs_official_source":
+                action = f"For {name}, cite the official {module.leed_version} {module.rating_family}/{module.adaptation} clause and map each required field ({', '.join(fields)}) to a page, sheet or calculation cell."
+            else:
+                action = f"Revise {name} to add explicit clause citation and page/sheet references for: {', '.join(fields) or 'scope and conclusion'}."
+            review.append({"requirement": name, "status": status, "required_phase": requirement.get("required_phase", "submission"), "accepted_file_types": accepted, "required_fields": fields, "responsible_discipline": requirement.get("responsible_discipline", "leed_consultant"), "matched_files": matched_files, "modification_comment": action})
+            actions.append(action)
+        return review, actions
 
     def comment_risk(self, project_id: UUID, credit_id: str) -> CommentRiskResponse:
         evidence = self.evidence(project_id, credit_id)
