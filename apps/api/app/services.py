@@ -19,7 +19,7 @@ from .schemas import (
     TenderRequirementResponse,
 )
 from .ingestion import extract_upload, extract_upload_path
-from .assessment import assess
+from .assessment import RULES, assess
 
 
 def registry_key(project: ProjectCreate | ProjectSummary) -> tuple[str, str, str]:
@@ -211,8 +211,33 @@ class MemoryStore:
         findings: list[ReviewFinding] = []
         for credit_id in credit_ids:
             module = self.registry.get_credit(*registry_key(project), credit_id)
-            evidence = self.evidence(project_id, credit_id)
-            findings.append(ReviewFinding(credit_id=credit_id, phase=request.phase, severity="high" if evidence[0].evidence_status == "missing" else "medium", finding_type="missing_evidence" if evidence[0].evidence_status == "missing" else "needs_official_source", finding_text="Required evidence is not verified against an official registry source." if evidence[0].evidence_status == "missing" else "Evidence is uploaded but needs registry-based validation.", recommended_action="Assign the evidence owner and validate against evidence_schema.json after official fields are supplied.", responsible_discipline="leed_consultant", evidence_refs=evidence[0].source_refs, confidence=evidence[0].confidence))
+            docs = self.documents[project_id]
+            requirements, actions = self._submission_requirement_review(module, docs)
+            pattern, default_action, default_owner = RULES.get(module.module_type, (module.credit_name.lower(), f"Map the uploaded evidence to the {module.credit_name} supporting-document list.", "leed_consultant"))
+            tokens = [token.strip().lower() for token in pattern.split("|")]
+            matched = [doc for doc in docs if any(token in f"{doc.get('filename', '')} {doc.get('text_preview', '')} {' '.join(doc.get('drawing', {}).get('keyword_hits', []))}".lower() for token in tokens)]
+            missing_requirements = [item for item in requirements if item["status"] == "missing"]
+            source_requirements = [item for item in requirements if item["status"] == "needs_official_source"]
+            refs = [{"document_id": str(doc["id"]), "filename": doc["filename"]} for doc in matched[:8]]
+            if not matched:
+                finding_type = "missing_evidence"
+                severity = "high" if module.is_prerequisite else "medium"
+                finding_text = f"No {module.credit_name}-specific indicator was found in the uploaded filenames, text previews or drawing keywords. Expected evidence: {', '.join(item['requirement'] for item in requirements) or default_action}"
+                action = actions[0] if actions else default_action
+                confidence = 0.15
+            elif missing_requirements:
+                finding_type = "gap"
+                severity = "high" if module.is_prerequisite else "medium"
+                finding_text = f"Matched {len(matched)} relevant file(s), but the supporting-document list is incomplete: {', '.join(item['requirement'] for item in missing_requirements)}."
+                action = " ".join(item["modification_comment"] for item in missing_requirements)
+                confidence = 0.55
+            else:
+                finding_type = "needs_official_source" if source_requirements else "likely_compliant"
+                severity = "medium" if source_requirements else "low"
+                finding_text = f"Matched {len(matched)} file(s) to {module.credit_name}: {', '.join(doc['filename'] for doc in matched[:4])}. Verify every required field and cross-credit scope before submission."
+                action = " ".join(item["modification_comment"] for item in source_requirements or requirements) or default_action
+                confidence = 0.68 if source_requirements else 0.78
+            findings.append(ReviewFinding(credit_id=credit_id, phase=request.phase, severity=severity, finding_type=finding_type, finding_text=finding_text, recommended_action=action, responsible_discipline=default_owner, evidence_refs=refs, confidence=confidence))
         return StageReviewResponse(project_summary=f"{len(findings)} registry-driven findings for {request.phase}.", findings=findings, discipline_actions={"leed_consultant": [finding.recommended_action for finding in findings]}, assumptions=["Deterministic MVP; no LLM or unverified LEED threshold is used."])
 
     def design_guide(self, project_id: UUID, phase: str = "concept") -> DesignGuideResponse:
