@@ -63,7 +63,9 @@ def extract_file(name: str, data: bytes, content_type: str | None = None, archiv
     ext = PurePosixPath(clean_name).suffix.lower()
     text, page_count, warnings = "", 0, []
     if skip_content:
-        warnings.append("Large drawing indexed in metadata mode; text preview is deferred to keep online processing stable.")
+        # Large archive members are indexed from their filename and ZIP
+        # metadata without adding a user-facing error to the document card.
+        pass
     elif ext in TEXT_EXTENSIONS:
         text = data[:2_000_000].decode("utf-8", errors="replace")
     elif ext == ".pdf":
