@@ -4,7 +4,6 @@ import io
 import os
 import mimetypes
 import re
-import tempfile
 import zipfile
 from pathlib import PurePosixPath
 from typing import Any
@@ -58,33 +57,13 @@ def _extract_pdf(data: bytes) -> tuple[str, int, list[str]]:
         return "", 0, warnings
 
 
-def _extract_pdf_path(path: str, max_pages: int = 3) -> tuple[str, int, list[str]]:
-    """Read a bounded text preview from a seekable PDF file without loading it into RAM."""
-    warnings: list[str] = []
-    try:
-        from pypdf import PdfReader
-        with open(path, "rb") as handle:
-            reader = PdfReader(handle, strict=False)
-            page_count = len(reader.pages)
-            text = "\n".join((reader.pages[index].extract_text() or "")[:20_000] for index in range(min(page_count, max_pages)))
-        if page_count > max_pages:
-            warnings.append(f"Bounded PDF text preview extracted from the first {max_pages} pages; full page count retained.")
-        return text[:100_000], page_count, warnings
-    except Exception as exc:
-        return "", 0, [f"Bounded PDF text extraction unavailable ({type(exc).__name__}); filename and drawing metadata were retained."]
-
-
-def extract_file(name: str, data: bytes, content_type: str | None = None, archive_member: str | None = None, *, declared_size: int | None = None, skip_content: bool = False, text_override: str | None = None, page_count_override: int | None = None, warnings_override: list[str] | None = None) -> dict[str, Any]:
+def extract_file(name: str, data: bytes, content_type: str | None = None, archive_member: str | None = None, *, declared_size: int | None = None, skip_content: bool = False) -> dict[str, Any]:
     if len(data) > MAX_FILE_BYTES:
         raise ValueError(f"{name} exceeds the {MAX_FILE_BYTES // (1024 * 1024)} MB file limit")
     clean_name = PurePosixPath(name.replace("\\", "/")).name or "upload.bin"
     ext = PurePosixPath(clean_name).suffix.lower()
     text, page_count, warnings = "", 0, []
-    if text_override is not None:
-        text = text_override
-        page_count = page_count_override or 0
-        warnings = list(warnings_override or [])
-    elif skip_content:
+    if skip_content:
         warnings.append("Content extraction skipped for a large archive member; filename and drawing metadata were retained.")
     elif ext in TEXT_EXTENSIONS:
         text = data[:2_000_000].decode("utf-8", errors="replace")
@@ -116,15 +95,7 @@ def extract_upload(name: str, data: bytes, content_type: str | None = None) -> l
             if member.file_size > MAX_FILE_BYTES or total + member.file_size > MAX_ARCHIVE_BYTES:
                 raise ValueError("ZIP uncompressed size exceeds the safe processing limit")
             total += member.file_size
-            if path.suffix.lower() == ".pdf" and member.file_size > MAX_PDF_TEXT_BYTES:
-                with tempfile.NamedTemporaryFile(suffix=".pdf") as temp:
-                    with archive.open(member, "r") as source:
-                        while chunk := source.read(1024 * 1024):
-                            temp.write(chunk)
-                    temp.flush()
-                    text, pages, warnings = _extract_pdf_path(temp.name)
-                results.append(extract_file(str(path), b"", None, archive_member=str(path), declared_size=member.file_size, text_override=text, page_count_override=pages, warnings_override=warnings))
-            elif member.file_size > MAX_IN_MEMORY_MEMBER_BYTES:
+            if member.file_size > MAX_IN_MEMORY_MEMBER_BYTES or path.suffix.lower() == ".pdf":
                 results.append(extract_file(str(path), b"", None, archive_member=str(path), declared_size=member.file_size, skip_content=True))
             else:
                 payload = archive.read(member)
@@ -150,15 +121,7 @@ def extract_upload_path(name: str, path: str, content_type: str | None = None) -
             if member.file_size > MAX_FILE_BYTES or total + member.file_size > MAX_ARCHIVE_BYTES:
                 raise ValueError("ZIP uncompressed size exceeds the safe processing limit")
             total += member.file_size
-            if member_path.suffix.lower() == ".pdf" and member.file_size > MAX_PDF_TEXT_BYTES:
-                with tempfile.NamedTemporaryFile(suffix=".pdf") as temp:
-                    with archive.open(member, "r") as source:
-                        while chunk := source.read(1024 * 1024):
-                            temp.write(chunk)
-                    temp.flush()
-                    text, pages, warnings = _extract_pdf_path(temp.name)
-                results.append(extract_file(str(member_path), b"", None, archive_member=str(member_path), declared_size=member.file_size, text_override=text, page_count_override=pages, warnings_override=warnings))
-            elif member.file_size > MAX_IN_MEMORY_MEMBER_BYTES:
+            if member.file_size > MAX_IN_MEMORY_MEMBER_BYTES or member_path.suffix.lower() == ".pdf":
                 results.append(extract_file(str(member_path), b"", None, archive_member=str(member_path), declared_size=member.file_size, skip_content=True))
             else:
                 with archive.open(member, "r") as handle:
