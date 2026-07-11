@@ -14,7 +14,7 @@ MAX_ARCHIVE_FILES = 500
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 # Render's Starter instance has a 512 MB memory ceiling. Do not materialize
 # very large drawing members or PDFs in Python just to extract a small preview.
-MAX_IN_MEMORY_MEMBER_BYTES = 32 * 1024 * 1024
+MAX_IN_MEMORY_MEMBER_BYTES = 8 * 1024 * 1024
 TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".xml", ".ifc", ".dxf", ".html", ".log"}
 DRAWING_EXTENSIONS = {".pdf", ".dwg", ".dxf", ".rvt", ".rfa", ".ifc", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
